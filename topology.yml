@@ -5,7 +5,7 @@ hosts:
   # !! Adapt "image" and "mgmt_user" to the SEED image registered in YOUR cloud / CyberRangeCZ.
   - name: seed
     base_box:
-      image: seed-ubuntu-20.04
+      image: seed
       mgmt_user: ubuntu
     flavor: m1.medium
 
