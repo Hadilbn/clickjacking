@@ -1,0 +1,7 @@
+cj_user: seed
+cj_labsetup: "/home/{{ cj_user }}/Labsetup"
+# Remove the student from the "sudo" group so that the root-only flag file stays unreadable.
+# (Set to false if your SEED image needs sudo for the desktop session.)
+cj_restrict_sudo: true
+cj_base_image: handsonsecurity/seed-server:apache
+cj_flags: {}

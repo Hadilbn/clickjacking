@@ -1,0 +1,3 @@
+cj_secrets:
+  labsetup: "{{ cj_labsetup }}"
+  flags: "{{ cj_flags }}"

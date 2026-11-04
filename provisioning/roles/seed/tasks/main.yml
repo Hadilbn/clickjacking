@@ -1,0 +1,103 @@
+---
+- name: Check that Docker and docker-compose are installed on the SEED image
+  command: "{{ item }} --version"
+  loop:
+    - docker
+    - docker-compose
+  changed_when: false
+
+- name: Make sure the Docker daemon is running
+  service:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Allow the student to use Docker without sudo
+  user:
+    name: "{{ cj_user }}"
+    groups: docker
+    append: yes
+
+- name: Map the lab host names (no sudo needed by the student)
+  lineinfile:
+    path: /etc/hosts
+    regexp: '\s{{ item.name | regex_escape }}$'
+    line: "{{ item.ip }} {{ item.name }}"
+  loop:
+    - { ip: 10.9.0.5,   name: www.cjlab.com }
+    - { ip: 10.9.0.105, name: www.cjlab-attacker.com }
+
+- name: Deploy the Labsetup folder (SEED Labs Clickjacking / Alice's Cupcakes)
+  copy:
+    src: Labsetup/
+    dest: "{{ cj_labsetup }}/"
+    owner: "{{ cj_user }}"
+    group: "{{ cj_user }}"
+    mode: '0644'
+    directory_mode: '0755'
+
+- name: Add the usual SEED aliases to .bashrc
+  blockinfile:
+    path: "/home/{{ cj_user }}/.bashrc"
+    create: yes
+    owner: "{{ cj_user }}"
+    group: "{{ cj_user }}"
+    marker: "# {mark} CJLAB ALIASES"
+    block: |
+      {% raw %}
+      alias dcbuild='docker-compose build'
+      alias dcup='docker-compose up'
+      alias dcdown='docker-compose down'
+      alias dockps='docker ps --format "{{.ID}}  {{.Names}}"'
+      alias cjlab-verify='sudo /usr/local/bin/cjlab-verify'
+      {% endraw %}
+
+- name: Pre-pull the SEED web-server base image (saves time and Docker Hub rate limit)
+  command: "docker pull {{ cj_base_image }}"
+  register: cj_pull
+  retries: 5
+  delay: 30
+  until: cj_pull.rc == 0
+  ignore_errors: yes
+
+# ---- personal flags + verifier ------------------------------------------------------------
+- name: Create the root-only directory for the flags
+  file:
+    path: /opt/cjlab
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Store the personal flags of this sandbox (root-only)
+  copy:
+    dest: /opt/cjlab/secrets.json
+    content: "{{ cj_secrets | to_nice_json }}"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+
+- name: Install the verifier tool
+  copy:
+    src: cjlab-verify
+    dest: /usr/local/bin/cjlab-verify
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Let the student run ONLY the verifier as root
+  copy:
+    dest: /etc/sudoers.d/cjlab-verify
+    content: "{{ cj_user }} ALL=(root) NOPASSWD: /usr/local/bin/cjlab-verify\n"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+
+- name: Remove the student from the sudo group (flags must stay unreadable)
+  command: "gpasswd -d {{ cj_user }} sudo"
+  register: cj_gpasswd
+  changed_when: "'Removing' in cj_gpasswd.stdout"
+  failed_when: false
+  when: cj_restrict_sudo | bool

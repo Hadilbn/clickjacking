@@ -1,0 +1,325 @@
+#!/usr/bin/env python3
+"""
+cjlab-verify - checks your work on the Clickjacking TP and prints YOUR personal flag.
+
+Usage:  sudo cjlab-verify <task>        (task = 0, 1, 2, 3, 4 or 5)
+        sudo cjlab-verify list
+
+The flags are generated per sandbox by CyberRangeCZ: a flag of a classmate is useless to you.
+The tool only READS your files and the lab web servers; it never modifies anything.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from urllib.parse import urlparse
+
+SECRETS = "/opt/cjlab/secrets.json"
+DEFENDER_IP, DEFENDER_HOST = "10.9.0.5", "www.cjlab.com"
+ATTACKER_IP, ATTACKER_HOST = "10.9.0.105", "www.cjlab-attacker.com"
+
+TITLES = {
+    0: "Task 0 - Start the lab environment",
+    1: "Task 1 - Copy that site (iframe)",
+    2: "Task 2 - Let's get clickjacking (invisible button)",
+    3: "Task 3 - Bust that frame (frame-busting script)",
+    4: "Task 4 - Bust the buster (sandbox attribute)",
+    5: "Task 5 - The ultimate bust (HTTP response headers)",
+}
+
+
+# --------------------------------------------------------------------------- helpers
+def read(path):
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        return fh.read()
+
+
+def strip_html_comments(s):
+    return re.sub(r"<!--.*?-->", "", s, flags=re.S)
+
+
+def strip_c_comments(s):
+    return re.sub(r"/\*.*?\*/", "", s, flags=re.S)
+
+
+def strip_js_comments(s):
+    s = strip_c_comments(s)
+    return re.sub(r"(?m)(?<![:\"'\\])//.*$", "", s)
+
+
+def css_rules(css):
+    """Very small CSS parser -> list of (selectors, declarations)."""
+    css = strip_c_comments(css)
+    rules = []
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+        sels = [x.strip().lower() for x in m.group(1).split(",") if x.strip()]
+        decls = {}
+        for d in m.group(2).split(";"):
+            if ":" in d:
+                k, v = d.split(":", 1)
+                v = re.sub(r"\s*!important", "", v.strip().lower())
+                decls[k.strip().lower()] = v
+        rules.append((sels, decls))
+    return rules
+
+
+def merged_style(rules, wanted):
+    """Declarations that apply to the given selectors (the last one wins, like in CSS)."""
+    out = {}
+    for sels, decls in rules:
+        if any(s in wanted for s in sels):
+            out.update(decls)
+    return out
+
+
+def tag_selectors(tag_attrs, tag_name):
+    wanted = {tag_name}
+    m = re.search(r"\bid\s*=\s*[\"']?([\w-]+)", tag_attrs, re.I)
+    if m:
+        wanted.add("#" + m.group(1).lower())
+        wanted.add(tag_name + "#" + m.group(1).lower())
+    m = re.search(r"\bclass\s*=\s*[\"']([^\"']+)[\"']", tag_attrs, re.I)
+    if m:
+        for c in m.group(1).split():
+            wanted.add("." + c.lower())
+            wanted.add(tag_name + "." + c.lower())
+    return wanted
+
+
+def inline_style(tag_attrs):
+    m = re.search(r"\bstyle\s*=\s*\"([^\"]*)\"|\bstyle\s*=\s*'([^']*)'", tag_attrs, re.I)
+    decls = {}
+    if m:
+        for d in (m.group(1) or m.group(2)).split(";"):
+            if ":" in d:
+                k, v = d.split(":", 1)
+                decls[k.strip().lower()] = v.strip().lower()
+    return decls
+
+
+def is_big(value, axis):
+    """True if a width/height value makes the iframe cover (almost) the whole page."""
+    v = value.strip().lower()
+    m = re.match(r"^(\d+(?:\.\d+)?)\s*(%|vw|vh|px)?$", v)
+    if not m:
+        return "100" in v          # calc(100% - ...), 100dvh, ...
+    num, unit = float(m.group(1)), m.group(2)
+    if unit in ("%", "vw", "vh"):
+        return num >= 95
+    return num >= (800 if axis == "w" else 500)
+
+
+def is_transparent(v):
+    v = v.replace(" ", "")
+    if v in ("transparent", "#0000", "#00000000", "rgba(0,0,0,0)"):
+        return True
+    return bool(re.match(r"^(rgba|hsla)\([^)]*,0(\.0+)?\)$", v))
+
+
+def http_get(ip, host, timeout=6):
+    req = urllib.request.Request("http://%s/" % ip, headers={"Host": host, "Cache-Control": "no-cache"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.status, dict((k.lower(), v) for k, v in resp.getheaders()), resp.read().decode("utf-8", "replace")
+
+
+# --------------------------------------------------------------------------- checks
+# every check returns a list of (ok, message)
+
+def check_task0(lab):
+    res = []
+    try:
+        out = subprocess.run(["docker", "ps", "--format", "{{.Names}}"], capture_output=True,
+                             text=True, timeout=20).stdout.split()
+    except Exception as exc:  # noqa
+        return [(False, "Cannot talk to Docker (%s)." % exc)]
+    res.append(("defender-10.9.0.5" in out, "Container defender-10.9.0.5 is running (dockps)"))
+    res.append(("attacker-10.9.0.105" in out, "Container attacker-10.9.0.105 is running (dockps)"))
+    try:
+        code, _, body = http_get(DEFENDER_IP, DEFENDER_HOST)
+        res.append((code == 200 and "Alice" in body, "http://www.cjlab.com serves the Alice's Cupcakes page"))
+    except Exception as exc:  # noqa
+        res.append((False, "http://www.cjlab.com is not reachable (%s)" % exc))
+    try:
+        code, _, body = http_get(ATTACKER_IP, ATTACKER_HOST)
+        res.append((code == 200, "http://www.cjlab-attacker.com serves the attacker page"))
+    except Exception as exc:  # noqa
+        res.append((False, "http://www.cjlab-attacker.com is not reachable (%s)" % exc))
+    return res
+
+
+def load_attacker(lab):
+    html = strip_html_comments(read(os.path.join(lab, "attacker", "attacker.html")))
+    css = read(os.path.join(lab, "attacker", "attacker.css"))
+    return html, css
+
+
+def check_task1(lab):
+    res = []
+    html, css = load_attacker(lab)
+    m = re.search(r"<iframe\b([^>]*)>", html, re.I | re.S)
+    res.append((bool(m), "attacker.html contains an <iframe> element (not inside a comment)"))
+    if not m:
+        return res
+    attrs = m.group(1)
+    sm = re.search(r"\bsrc\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))", attrs, re.I)
+    src = (sm.group(1) or sm.group(2) or sm.group(3)) if sm else ""
+    host = (urlparse(src).hostname or "").lower()
+    res.append((host == DEFENDER_HOST, "the iframe src points to http://www.cjlab.com"))
+    b = re.search(r"<button\b", html, re.I)
+    res.append((bool(b) and b.start() > m.start(), "the malicious <button> comes AFTER the iframe in the HTML"))
+
+    style = merged_style(css_rules(css), tag_selectors(attrs, "iframe"))
+    style.update(inline_style(attrs))
+    border_ok = (
+        re.match(r"^(none|0)\b", style.get("border", "x")) is not None
+        or style.get("border-width", "x").startswith("0")
+        or style.get("border-style", "x") == "none"
+        or re.search(r"\bframeborder\s*=\s*[\"']?0", attrs, re.I) is not None
+    )
+    res.append((border_ok, "the iframe has no border"))
+    res.append(("width" in style and is_big(style["width"], "w"), "the iframe CSS gives it a full-page width"))
+    res.append(("height" in style and is_big(style["height"], "h"), "the iframe CSS gives it a full-page height"))
+    return res
+
+
+def check_task2(lab):
+    res = check_task1(lab)
+    html, css = load_attacker(lab)
+    b = re.search(r"<button\b([^>]*)>", html, re.I | re.S)
+    res.append((bool(b) and "hacked.html" in b.group(1), "the malicious button still leads to hacked.html"))
+    wanted = tag_selectors(b.group(1) if b else "", "button")
+    style = merged_style(css_rules(css), wanted)
+    if b:
+        style.update(inline_style(b.group(1)))
+
+    opacity = None
+    try:
+        opacity = float(style.get("opacity", "1"))
+    except ValueError:
+        pass
+    invisible = (opacity is not None and opacity <= 0.05) or (
+        is_transparent(style.get("background-color", "")) and is_transparent(style.get("color", "")))
+    res.append((invisible, "the malicious button is invisible (opacity 0, or transparent color AND background-color)"))
+
+    broken = (style.get("display") == "none" or style.get("visibility") in ("hidden", "collapse")
+              or style.get("pointer-events") == "none"
+              or re.match(r"^-\d", style.get("z-index", "0")) is not None)
+    res.append((not broken, "...but still clickable (no display:none / visibility:hidden / pointer-events:none / negative z-index)"))
+
+    moved = any(k in style and style[k].strip() not in ("0", "0px", "auto", "")
+                for k in ("margin-left", "margin-top", "margin", "left", "top", "transform", "translate"))
+    res.append((moved, "the button has been moved (margin-left / margin-top / left / top ...)"))
+    return res
+
+
+def extract_function_body(js, name):
+    m = re.search(r"function\s+%s\s*\(\s*\)\s*\{" % re.escape(name), js)
+    if not m:
+        return None
+    depth, i = 1, m.end()
+    while i < len(js) and depth:
+        depth += {"{": 1, "}": -1}.get(js[i], 0)
+        i += 1
+    return js[m.end():i - 1]
+
+
+def check_task3(lab):
+    res = []
+    html = strip_html_comments(read(os.path.join(lab, "defender", "index.html")))
+    js = "\n".join(strip_js_comments(s) for s in re.findall(r"<script\b[^>]*>(.*?)</script>", html, re.S | re.I))
+    body = extract_function_body(js, "makeThisFrameOnTop")
+    res.append((body is not None and body.strip() != "", "makeThisFrameOnTop() in defender/index.html is no longer empty"))
+    body = body or ""
+    res.append((re.search(r"\btop\b", body) is not None and re.search(r"\bself\b", body) is not None
+                and re.search(r"!==|!=|===|==", body) is not None,
+                "it compares window.top with window.self"))
+    assigns = re.search(r"\btop\.location(\.href)?\s*=(?!=)|\btop\.location\.(replace|assign)\s*\(", body) is not None
+    res.append((assigns and body.count("location") >= 2,
+                "it sets the location of the top window to the location of the current window"))
+    res.append((len(re.findall(r"makeThisFrameOnTop\s*\(", js)) >= 2, "the function is still called from window.onload"))
+    return res
+
+
+def check_task4(lab):
+    res = []
+    html, _ = load_attacker(lab)
+    m = re.search(r"<iframe\b([^>]*)>", html, re.I | re.S)
+    attrs = m.group(1) if m else ""
+    sb = re.search(r"\bsandbox\b(?:\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]*)))?", attrs, re.I)
+    res.append((sb is not None, "the iframe in attacker.html has the sandbox attribute"))
+    tokens = ((sb.group(1) or sb.group(2) or sb.group(3) or "") if sb else "").lower().split()
+    res.append(("allow-top-navigation" not in tokens, "...without the token allow-top-navigation"))
+    res.append(("allow-scripts" not in tokens, "...without allow-scripts (the frame-buster must not be able to run)"))
+    res.append((True, "--- prerequisites that must still be in place ---"))
+    res += check_task2(lab)
+    res += check_task3(lab)
+    return res
+
+
+def check_task5(lab):
+    res = []
+    try:
+        code, headers, _ = http_get(DEFENDER_IP, DEFENDER_HOST)
+    except Exception as exc:  # noqa
+        return [(False, "http://www.cjlab.com is not reachable (%s) - are the containers running?" % exc)]
+    xfo = headers.get("x-frame-options", "").strip().upper()
+    csp = headers.get("content-security-policy", "")
+    res.append((xfo == "DENY", "the server answers with the header X-Frame-Options: DENY (found: %r)" % xfo))
+    res.append((re.search(r"frame-ancestors\s+'none'", csp, re.I) is not None,
+                "the server answers with Content-Security-Policy: frame-ancestors 'none' (found: %r)" % csp))
+    return res
+
+
+CHECKS = {0: check_task0, 1: check_task1, 2: check_task2, 3: check_task3, 4: check_task4, 5: check_task5}
+
+
+# --------------------------------------------------------------------------- main
+def main(argv):
+    if len(argv) != 2 or argv[1] == "list" or not argv[1].isdigit() or int(argv[1]) not in CHECKS:
+        print(__doc__)
+        for n in sorted(TITLES):
+            print("  %d  %s" % (n, TITLES[n]))
+        return 0 if len(argv) == 2 and argv[1] == "list" else 2
+    task = int(argv[1])
+    if os.geteuid() != 0:
+        print("Please run:  sudo cjlab-verify %d" % task)
+        return 2
+    try:
+        cfg = json.loads(read(SECRETS))
+        lab = cfg["labsetup"]
+        flag = cfg["flags"][str(task)]
+    except Exception as exc:  # noqa
+        print("Internal error: cannot read the flag store (%s). Tell your instructor." % exc)
+        return 3
+
+    print("\n== %s ==\n" % TITLES[task])
+    try:
+        results = CHECKS[task](lab)
+    except FileNotFoundError as exc:
+        print("[FAIL] file not found: %s" % exc.filename)
+        return 1
+    all_ok = True
+    for ok, msg in results:
+        if msg.startswith("---"):
+            print("  " + msg)
+            continue
+        print("  [%s] %s" % (" OK " if ok else "FAIL", msg))
+        all_ok = all_ok and ok
+    print()
+    if not all_ok:
+        print("Not validated yet - fix the FAIL lines above and run the tool again.")
+        return 1
+    bar = "=" * (len(flag) + 14)
+    print(bar)
+    print("  TASK %d VALIDATED" % task)
+    print("  Your flag:  %s" % flag)
+    print(bar)
+    print("Copy it EXACTLY into the answer box of CyberRangeCZ. It is valid for your sandbox only.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

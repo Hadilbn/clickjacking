@@ -1,0 +1,517 @@
+{
+  "title": "Clickjacking - Alice's Cupcakes (SEED Labs TP)",
+  "description": "Hands-on system-security lab on clickjacking (UI redress attack): build a malicious page with an iframe and an invisible button, defend with a frame-busting script, bypass it with the iframe sandbox attribute, and finally block the attack with X-Frame-Options and Content-Security-Policy frame-ancestors. Flags are unique for every student (variant sandboxes). Scored out of 20 (platform shows x10 = 200 points).",
+  "prerequisites": [
+    "Basic knowledge of HTML, CSS and JavaScript",
+    "Basic Linux command line and Docker usage",
+    "Basic knowledge of the HTTP protocol (requests, responses, headers)"
+  ],
+  "outcomes": [
+    "Explain how a clickjacking attack works and why it is dangerous",
+    "Build a clickjacking attack with an iframe and a transparent overlay button",
+    "Implement and bypass a JavaScript frame-busting defense (iframe sandbox)",
+    "Configure X-Frame-Options and Content-Security-Policy frame-ancestors on an Apache server"
+  ],
+  "state": "UNRELEASED",
+  "show_stepper_bar": true,
+  "levels": [
+    {
+      "title": "Welcome and grading rules",
+      "level_type": "INFO_LEVEL",
+      "order": 0,
+      "estimated_duration": 0,
+      "minimal_possible_solve_time": null,
+      "content": "# Clickjacking TP - *Alice's Cupcakes*\n\n**Read this page carefully, it explains how you are graded.**\n\n## Story\n*Alice's Cupcakes* is a small local bakery with a nice website. Alice has heard about **clickjacking** (a \"UI redress attack\") and asks you to find out whether her site can be abused. You will play both roles:\n\n1. **The attacker** - build a malicious page that loads Alice's site in an iframe and hides an invisible button over her real *Explore Menu* button (Tasks 1-2).\n2. **The defender** - protect the site with a frame-busting script (Task 3), watch the attacker bypass it with the `sandbox` attribute (Task 4), then fix the problem properly on the server side with HTTP headers (Task 5).\n\n## Your environment\nYou get **your own sandbox**: one SEED Ubuntu VM (`seed`). The two websites run in Docker containers on that VM (SEED Labs *Clickjacking* lab, folder `~/Labsetup`). Nobody else can see or break your sandbox.\n\n## How the flags work (no copy-paste between classmates)\n* Every level has **its own flag, generated randomly for your sandbox**. A flag from a classmate is simply wrong for you.\n* You do **not** guess a flag: you earn it. When you think a task is done, run in a terminal of the VM\n\n```\nsudo cjlab-verify <task number>        # e.g.  sudo cjlab-verify 3\n```\n\n  The tool checks your files / the running websites, tells you what is still missing (`[FAIL]` lines) and, once everything is `[ OK ]`, prints **your personal flag**. Copy it **exactly** into the answer box.\n* You have 10 attempts per level.\n\n## Grading: 20 / 20\nThe platform works with whole points, so the score is displayed **x10**: **200 points = 20/20**.\n\n| Level | Points shown by the platform | Counts for |\n|---|---|---|\n| Task 0 - Start the environment | 10 | 1 / 20 |\n| Task 1 - Copy that site | 20 | 2 / 20 |\n| Task 2 - Let's get clickjacking | 30 | 3 / 20 |\n| Task 3 - Bust that frame | 30 | 3 / 20 |\n| Task 4 - Bust the buster | 30 | 3 / 20 |\n| Task 5 - The ultimate bust | 40 | 4 / 20 |\n| Final quiz | 40 | 4 / 20 |\n| **Total** | **200** | **20 / 20** |\n\n**Hints cost points:** each hint removes between **5 and 20 platform points = 0.5 to 2 points out of 20** (the price is written on the hint button). **Displaying the full solution gives 0 for that level.**\n\n## Rules\n* This game is for **educational purposes only**. Use these techniques **only** inside your sandbox (10.9.0.x lab containers). Attacking real websites is illegal.\n* Besides this game you must hand in the **lab report** requested by your teacher: screenshots + answers to the questions Q1-Q12 (they are listed in each level) + the important code snippets with explanations.\n* The platform records your actions. Work alone."
+    },
+    {
+      "title": "Get Access",
+      "level_type": "ACCESS_LEVEL",
+      "order": 1,
+      "estimated_duration": 0,
+      "minimal_possible_solve_time": null,
+      "passkey": "start",
+      "cloud_content": "Your first task is to access the sandbox, where you will complete all following tasks. After you have successfully connected, submit the answer **`start`**.\n\n### Sandbox access\n1. In the topology overview on the right, right-click on **`seed`** and then click on **`Open GUI`**; a new pop-up window will appear.\n2. Login with username **`seed`** and password **`dees`**.\n\nAlternatively, you can use SSH to connect to the machine (handy for copy-paste), but the browsers you need for this lab are in the graphical session. See the [documentation](https://docs.platform.cyberrange.cz/user-guide-advanced/sandboxes/sandbox-access/#user-access) for details.",
+      "local_content": "This sandbox has not been tested for use with local sandbox."
+    },
+    {
+      "title": "Task 0 - Start the lab environment",
+      "level_type": "TRAINING_LEVEL",
+      "order": 2,
+      "estimated_duration": 10,
+      "minimal_possible_solve_time": null,
+      "answer": null,
+      "answer_variable_name": "flag_t0_setup",
+      "content": "# Task 0 - Start the lab environment\n\nTwo websites are needed in this lab, each one in a Docker container of your VM:\n\n| Role | Container IP | URL |\n|---|---|---|\n| **Defender** (Alice's Cupcakes) | 10.9.0.5 | http://www.cjlab.com |\n| **Attacker** (malicious site) | 10.9.0.105 | http://www.cjlab-attacker.com |\n\nThe host names are already mapped in `/etc/hosts` for you.\n\n## To do\n1. Open a terminal and go to the lab folder: `cd ~/Labsetup`.\n2. Build the images and start the containers (`docker-compose` - see the aliases `dcbuild`, `dcup`).\n3. Check with `dockps` that the two containers run.\n4. In Firefox open **http://www.cjlab.com** (Alice's Cupcakes - zoom with `Ctrl +` / `Ctrl -` until the page fits) and **http://www.cjlab-attacker.com** (a single button that leads to a *You have been hacked* page).\n5. Look at the files you will edit during the lab: `defender/index.html`, `attacker/attacker.html`, `attacker/attacker.css`, `image_defender/apache_defender.conf`.\n6. Get your flag: `sudo cjlab-verify 0`\n\n> The files in `defender/` and `attacker/` are mounted into the containers: after editing them just reload the page (clear the browser cache with `Ctrl+Shift+R` if you do not see the change). Changes of the Apache configuration need a rebuild (Task 5).",
+      "solution": "```\nseed@seed:~$ cd ~/Labsetup\nseed@seed:~/Labsetup$ dcbuild\nseed@seed:~/Labsetup$ dcup            # stays in the foreground: use a 2nd terminal tab afterwards\nseed@seed:~$ dockps\n... defender-10.9.0.5\n... attacker-10.9.0.105\nseed@seed:~$ sudo cjlab-verify 0\n```\nYour flag is: **`${ANSWER}`**",
+      "solution_penalized": true,
+      "hints": [
+        {
+          "title": "Which commands start the containers?",
+          "content": "From `~/Labsetup` run `dcbuild` (= `docker-compose build`) and then `dcup` (= `docker-compose up`). `dcup` keeps running in the foreground: open a **second terminal tab** for the other commands, or use `docker-compose up -d`.",
+          "hint_penalty": 5,
+          "order": 0
+        },
+        {
+          "title": "The build fails or the sites do not answer",
+          "content": "Run `dockps` to see which container is missing. If the build cannot download the base image, retry `docker pull handsonsecurity/seed-server:apache`. If `permission denied` appears for docker, log out and in again. Then run `sudo cjlab-verify 0` and read the `[FAIL]` lines.",
+          "hint_penalty": 5,
+          "order": 1
+        }
+      ],
+      "incorrect_answer_limit": 10,
+      "attachments": [],
+      "max_score": 10,
+      "variant_answers": true,
+      "reference_solution": [],
+      "mitre_techniques": [],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Task 1 - Copy that site! (iframe)",
+      "level_type": "TRAINING_LEVEL",
+      "order": 3,
+      "estimated_duration": 10,
+      "minimal_possible_solve_time": null,
+      "answer": null,
+      "answer_variable_name": "flag_t1_iframe",
+      "content": "# Task 1 - Copy that site!\n\nThe first step of the attacker is to make the malicious site look **exactly like** Alice's website. The usual trick is an HTML **inline frame** (`<iframe>`) that embeds another page: the `src` attribute tells which page is loaded inside.\n\n## To do\n* In `~/Labsetup/attacker/attacker.html` add an `<iframe>` that loads **http://www.cjlab.com** (replace the `TODO` comment; the malicious `<button>` must stay **after** the iframe).\n* In `~/Labsetup/attacker/attacker.css` use `height`, `width` and `position` so that the iframe **covers the whole page** and the button is displayed **over** the iframe. Explicitly remove the **border**.\n* Hints from the lab: look at the difference between `position: absolute` and `position: relative`.\n* Reload http://www.cjlab-attacker.com and observe the result.\n* Get your flag: `sudo cjlab-verify 1`\n\n## For your lab report\n**Q1.** With the iframe inserted, what does the attacker's website look like? (screenshot)",
+      "solution": "`attacker.html`\n```html\n<iframe src=\"http://www.cjlab.com\"></iframe>\n<button onclick=\"window.location.href = 'hacked.html';\">Malicious Button</button>\n```\n`attacker.css`\n```css\niframe {\n    position: absolute;\n    top: 0;\n    left: 0;\n    width: 100%;\n    height: 100%;\n    border: none;\n}\n```\nThen `sudo cjlab-verify 1`. Your flag is: **`${ANSWER}`**",
+      "solution_penalized": true,
+      "hints": [
+        {
+          "title": "iframe syntax",
+          "content": "An iframe is written `<iframe src=\"URL\"></iframe>`. Put it in the `<body>`, **before** the `<button>` (elements that come later are drawn on top).",
+          "hint_penalty": 5,
+          "order": 0
+        },
+        {
+          "title": "Which CSS properties?",
+          "content": "Give the iframe `width: 100%; height: 100%; border: none;`. To let it fill the page from the top-left corner use `position: absolute; top: 0; left: 0;` (an absolutely positioned element is removed from the normal flow, just like the given button).",
+          "hint_penalty": 10,
+          "order": 1
+        },
+        {
+          "title": "Why does my page look different from Alice's?",
+          "content": "Browsers add default margins/borders. Check that `border` is `none` and that there is no scroll bar: `100%` width **and** height. Clear the cache (`Ctrl+Shift+R`). Then run `sudo cjlab-verify 1` and read the `[FAIL]` lines.",
+          "hint_penalty": 15,
+          "order": 2
+        }
+      ],
+      "incorrect_answer_limit": 10,
+      "attachments": [],
+      "max_score": 20,
+      "variant_answers": true,
+      "reference_solution": [],
+      "mitre_techniques": [],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Task 2 - Let's get clickjacking! (invisible button)",
+      "level_type": "TRAINING_LEVEL",
+      "order": 4,
+      "estimated_duration": 15,
+      "minimal_possible_solve_time": null,
+      "answer": null,
+      "answer_variable_name": "flag_t2_clickjack",
+      "content": "# Task 2 - Let's get clickjacking!\n\nNow hide the malicious button **exactly over** Alice's *Explore Menu* button, so that a visitor who thinks they click *Explore Menu* actually clicks **your** button.\n\n## To do\nEdit the `button` rule of `~/Labsetup/attacker/attacker.css` (the parts marked `TODO`):\n* make the button **invisible** but still **clickable**;\n* **move** it so that it covers the *Explore Menu* button of the framed page (e.g. `margin-left` and `margin-top`; adjust until it fits on **your** screen / zoom level).\n* Test: click where *Explore Menu* is displayed on http://www.cjlab-attacker.com - you must land on the *You have been hacked* page.\n* Get your flag: `sudo cjlab-verify 2`\n\n## For your lab report\n**Q2.** How does the appearance of the attacker's site compare to the defender's site?\n**Q3.** What happens when you click on *Explore Menu* on the attacker's site?\n**Q4.** Describe an attack scenario in which this style of clickjacking leads to undesirable consequences for a victim user.",
+      "solution": "`attacker.css` - button rule (values of `margin-*` depend on your screen and zoom, tune them)\n```css\nbutton {\n    /* given code ... */\n    color: transparent;\n    background-color: transparent;   /* or: opacity: 0; */\n    margin-left: 45px;\n    margin-top: 345px;\n}\n```\nThen `sudo cjlab-verify 2`. Your flag is: **`${ANSWER}`**",
+      "solution_penalized": true,
+      "hints": [
+        {
+          "title": "How to make an element invisible but clickable?",
+          "content": "An element with `display: none` or `visibility: hidden` cannot be clicked at all. Instead make it **transparent**: `opacity: 0;` or set both `color` and `background-color` to `transparent`.",
+          "hint_penalty": 5,
+          "order": 0
+        },
+        {
+          "title": "How do I find the position of Explore Menu?",
+          "content": "Open http://www.cjlab.com, press `F12`, click the element picker and hover over *Explore Menu*: the developer tools show its size and position. Remember the attacker's button is `position: absolute`, so `margin-left` / `margin-top` (or `left` / `top`) move it relative to the top-left corner of the page. Make the attacker's button temporarily **visible** (e.g. blue background) while you tune the values.",
+          "hint_penalty": 10,
+          "order": 1
+        },
+        {
+          "title": "Starting values",
+          "content": "On a standard layout *Explore Menu* is about **45-50 px from the left** and **340-350 px from the top**. Try `margin-left: 45px; margin-top: 345px;` and adjust. Keep the button's `onclick` pointing to `hacked.html`.",
+          "hint_penalty": 20,
+          "order": 2
+        }
+      ],
+      "incorrect_answer_limit": 10,
+      "attachments": [],
+      "max_score": 30,
+      "variant_answers": true,
+      "reference_solution": [],
+      "mitre_techniques": [],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Task 3 - Bust that frame! (frame-busting script)",
+      "level_type": "TRAINING_LEVEL",
+      "order": 5,
+      "estimated_duration": 10,
+      "minimal_possible_solve_time": null,
+      "answer": null,
+      "answer_variable_name": "flag_t3_framebuster",
+      "content": "# Task 3 - Bust that frame!\n\nTime to switch sides. **Frame busting** prevents a page from being displayed inside a frame of another site. You will add a JavaScript frame-buster to **Alice's** page.\n\n## To do\nOpen `~/Labsetup/defender/index.html` and fill in the (empty) JavaScript function **`makeThisFrameOnTop()`**:\n* compare `window.top` and `window.self` to find out whether the top window and the current window are the same object (they should be);\n* if they differ, use the **Location object** to set the location of the **top** window to the location of the **current** window.\n\nIt takes only a few lines. Reload http://www.cjlab-attacker.com to see whether the attacker is stopped, then get your flag: `sudo cjlab-verify 3`\n\n## For your lab report\n**Q5.** What happens when you navigate to the attacker's site now?\n**Q6.** What happens when you click the button?",
+      "solution": "`defender/index.html`\n```javascript\nfunction makeThisFrameOnTop() {\n    if (window.top !== window.self) {\n        window.top.location = window.self.location;\n    }\n}\n```\nThen `sudo cjlab-verify 3`. Your flag is: **`${ANSWER}`**",
+      "solution_penalized": true,
+      "hints": [
+        {
+          "title": "What do window.top and window.self mean?",
+          "content": "`window.self` is the window the script runs in; `window.top` is the topmost window of the tab. In a normal page both are the same object. Inside an iframe `window.top` is the **parent** page.",
+          "hint_penalty": 5,
+          "order": 0
+        },
+        {
+          "title": "How to change the location?",
+          "content": "`window.location` is a Location object: assigning to it navigates the window. So you can assign to `window.top.location`.",
+          "hint_penalty": 10,
+          "order": 1
+        },
+        {
+          "title": "Skeleton",
+          "content": "```javascript\nfunction makeThisFrameOnTop() {\n    if ( /* top and self are different */ ) {\n        /* top.location = self.location */\n    }\n}\n```\nUse `!==` for *different*. Do not forget to clear the browser cache after the change.",
+          "hint_penalty": 20,
+          "order": 2
+        }
+      ],
+      "incorrect_answer_limit": 10,
+      "attachments": [],
+      "max_score": 30,
+      "variant_answers": true,
+      "reference_solution": [],
+      "mitre_techniques": [],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Task 4 - Bust the buster! (sandbox attribute)",
+      "level_type": "TRAINING_LEVEL",
+      "order": 6,
+      "estimated_duration": 10,
+      "minimal_possible_solve_time": null,
+      "answer": null,
+      "answer_variable_name": "flag_t4_sandbox",
+      "content": "# Task 4 - Bust the buster!\n\nBack to the attacker. Front-end defenses such as frame busting run **in the victim's browser, inside the page the attacker controls the frame of**, so the attacker can neutralise them. One of the simplest workarounds here is the **`sandbox`** attribute of the `<iframe>`.\n\n## To do\n* Read about the `sandbox` attribute of iframes (MDN: *iframe - sandbox*).\n* Add the `sandbox` attribute to the iframe in `~/Labsetup/attacker/attacker.html` so that the frame-buster of the defender can no longer redirect the top window. **Do not remove the frame-busting script of Task 3** and keep your Task 1-2 attack intact.\n* Reload http://www.cjlab-attacker.com and click on the (invisible) button.\n* Get your flag: `sudo cjlab-verify 4`\n\n## For your lab report\n**Q7.** What does the `sandbox` attribute do? Why does it prevent the frame buster from working?\n**Q8.** What happens when you navigate to the attacker's site after the change?\n**Q9.** What happens when you click the button on the attacker's site?",
+      "solution": "`attacker.html`\n```html\n<iframe src=\"http://www.cjlab.com\" sandbox></iframe>\n```\nWith an empty `sandbox` attribute the framed page is treated as a unique origin, **scripts are blocked** and it cannot navigate the top-level window (no `allow-scripts`, no `allow-top-navigation`) - so `makeThisFrameOnTop()` never runs / can never replace the attacker's page. Then `sudo cjlab-verify 4`. Your flag is: **`${ANSWER}`**",
+      "solution_penalized": true,
+      "hints": [
+        {
+          "title": "Where do I put the attribute?",
+          "content": "Directly in the opening tag of the iframe, next to `src`: `<iframe src=\"...\" sandbox></iframe>`.",
+          "hint_penalty": 5,
+          "order": 0
+        },
+        {
+          "title": "What does sandbox do?",
+          "content": "`sandbox` applies extra restrictions to the framed content. Each restriction is lifted only if you list the matching token (`allow-scripts`, `allow-forms`, `allow-top-navigation`, ...). Think about which restriction stops the defender's JavaScript.",
+          "hint_penalty": 10,
+          "order": 1
+        },
+        {
+          "title": "My flag is refused",
+          "content": "The checker requires the sandbox attribute **without** `allow-top-navigation` and without `allow-scripts`, and your Tasks 1-3 must still be in place. Run `sudo cjlab-verify 4` and read the `[FAIL]` lines.",
+          "hint_penalty": 15,
+          "order": 2
+        }
+      ],
+      "incorrect_answer_limit": 10,
+      "attachments": [],
+      "max_score": 30,
+      "variant_answers": true,
+      "reference_solution": [],
+      "mitre_techniques": [],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Task 5 - The ultimate bust (HTTP response headers)",
+      "level_type": "TRAINING_LEVEL",
+      "order": 7,
+      "estimated_duration": 15,
+      "minimal_possible_solve_time": null,
+      "answer": null,
+      "answer_variable_name": "flag_t5_headers",
+      "content": "# Task 5 - The ultimate bust\n\nFront-end defenses can be circumvented, so the **server** must tell the browser not to display the page in a frame. Two HTTP response headers do that:\n\n* **`X-Frame-Options`** (XFO) - the older one;\n* **`Content-Security-Policy`** (CSP) - the newer, more powerful one. The directive relevant to clickjacking is **`frame-ancestors`**.\n\n## To do\n1. Open `~/Labsetup/image_defender/apache_defender.conf`. The header lines are commented out: uncomment them and fill them in:\n   * `X-Frame-Options` = **`DENY`**\n   * `Content-Security-Policy` containing the directive **`frame-ancestors 'none'`**\n2. The configuration is copied **into the image**, so rebuild and restart: `dcdown`, `dcbuild`, `dcup`.\n3. Check the headers: `curl -I http://www.cjlab.com`\n4. Test the attacker's site **after each header, one at a time**, then with both.\n5. Get your flag: `sudo cjlab-verify 5`\n\n## For your lab report\n**Q10.** What is the `X-Frame-Options` header and why is it set to `DENY` to prevent the attack?\n**Q11.** What is the `Content-Security-Policy` header and why is it set to `frame-ancestors 'none'` to prevent the attack?\n**Q12.** What happens when you navigate to the attacker's site after modifying each response header (one at a time)? What do you see when you click the button?",
+      "solution": "`image_defender/apache_defender.conf`\n```apache\n<VirtualHost *:80>\n    DocumentRoot /var/www/defender\n    ServerName www.cjlab.com\n    Header set X-Frame-Options \"DENY\"\n    Header set Content-Security-Policy \" \\\n             frame-ancestors 'none'; \\\n           \"\n</VirtualHost>\n```\n```\nseed@seed:~/Labsetup$ dcdown && dcbuild && dcup\nseed@seed:~$ curl -I http://www.cjlab.com      # X-Frame-Options and Content-Security-Policy are present\nseed@seed:~$ sudo cjlab-verify 5\n```\nYour flag is: **`${ANSWER}`**",
+      "solution_penalized": true,
+      "hints": [
+        {
+          "title": "Syntax of a header in Apache",
+          "content": "In an Apache `VirtualHost`, `Header set <Header-name> \"<value>\"` adds a response header. The two header names are `X-Frame-Options` and `Content-Security-Policy`.",
+          "hint_penalty": 5,
+          "order": 0
+        },
+        {
+          "title": "My change has no effect / Apache refuses to start",
+          "content": "The conf file is baked into the Docker image: you **must** `dcdown`, `dcbuild`, `dcup`. Also: the placeholder line in the file ends with a `;` - a `Header` **directive** must **not** end with `;` (only the CSP *value* uses `;` after a directive). Check the logs of `dcup` for syntax errors.",
+          "hint_penalty": 10,
+          "order": 1
+        },
+        {
+          "title": "Full lines",
+          "content": "```apache\nHeader set X-Frame-Options \"DENY\"\nHeader set Content-Security-Policy \"frame-ancestors 'none';\"\n```\n(Keep them inside `<VirtualHost>` ... `</VirtualHost>`.) Verify with `curl -I http://www.cjlab.com`.",
+          "hint_penalty": 20,
+          "order": 2
+        }
+      ],
+      "incorrect_answer_limit": 10,
+      "attachments": [],
+      "max_score": 40,
+      "variant_answers": true,
+      "reference_solution": [],
+      "mitre_techniques": [],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Final quiz - what did you observe?",
+      "level_type": "ASSESSMENT_LEVEL",
+      "order": 8,
+      "estimated_duration": 10,
+      "minimal_possible_solve_time": null,
+      "questions": [
+        {
+          "question_type": "MCQ",
+          "text": "What is clickjacking?",
+          "points": 5,
+          "penalty": 0,
+          "order": 0,
+          "answer_required": true,
+          "choices": [
+            {
+              "text": "Tricking a user into clicking something different from what they perceive, typically by overlaying a hidden element on a legitimate page",
+              "correct": true,
+              "order": 0
+            },
+            {
+              "text": "Stealing the session cookie by injecting JavaScript into a web page",
+              "correct": false,
+              "order": 1
+            },
+            {
+              "text": "Intercepting the traffic between a browser and a web server",
+              "correct": false,
+              "order": 2
+            },
+            {
+              "text": "Guessing the password of a user with a dictionary attack",
+              "correct": false,
+              "order": 3
+            }
+          ]
+        },
+        {
+          "question_type": "MCQ",
+          "text": "Which HTML element did the attacker use to load Alice's website inside the malicious page?",
+          "points": 5,
+          "penalty": 0,
+          "order": 1,
+          "answer_required": true,
+          "choices": [
+            {
+              "text": "<embed-site>",
+              "correct": false,
+              "order": 0
+            },
+            {
+              "text": "<link>",
+              "correct": false,
+              "order": 1
+            },
+            {
+              "text": "<frameset-redirect>",
+              "correct": false,
+              "order": 2
+            },
+            {
+              "text": "<iframe>",
+              "correct": true,
+              "order": 3
+            }
+          ]
+        },
+        {
+          "question_type": "MCQ",
+          "text": "Which CSS declaration makes the malicious button invisible while it can still receive the victim's click?",
+          "points": 5,
+          "penalty": 0,
+          "order": 2,
+          "answer_required": true,
+          "choices": [
+            {
+              "text": "visibility: hidden;",
+              "correct": false,
+              "order": 0
+            },
+            {
+              "text": "z-index: -1;",
+              "correct": false,
+              "order": 1
+            },
+            {
+              "text": "opacity: 0;",
+              "correct": true,
+              "order": 2
+            },
+            {
+              "text": "display: none;",
+              "correct": false,
+              "order": 3
+            }
+          ]
+        },
+        {
+          "question_type": "MCQ",
+          "text": "What does the frame-busting script compare?",
+          "points": 5,
+          "penalty": 0,
+          "order": 3,
+          "answer_required": true,
+          "choices": [
+            {
+              "text": "window.opener and window.name",
+              "correct": false,
+              "order": 0
+            },
+            {
+              "text": "window.top and window.self",
+              "correct": true,
+              "order": 1
+            },
+            {
+              "text": "window.parent and document.referrer",
+              "correct": false,
+              "order": 2
+            },
+            {
+              "text": "window.location and document.domain",
+              "correct": false,
+              "order": 3
+            }
+          ]
+        },
+        {
+          "question_type": "MCQ",
+          "text": "Why does the sandbox attribute defeat the JavaScript frame-buster?",
+          "points": 5,
+          "penalty": 0,
+          "order": 4,
+          "answer_required": true,
+          "choices": [
+            {
+              "text": "Sandboxed frames cannot run scripts or navigate the top-level window unless the matching allow-* tokens are given",
+              "correct": true,
+              "order": 0
+            },
+            {
+              "text": "It encrypts the content of the framed page",
+              "correct": false,
+              "order": 1
+            },
+            {
+              "text": "It makes the browser ignore the src attribute",
+              "correct": false,
+              "order": 2
+            },
+            {
+              "text": "It hides the framed page from the victim",
+              "correct": false,
+              "order": 3
+            }
+          ]
+        },
+        {
+          "question_type": "MCQ",
+          "text": "Why are front-end defenses such as frame busting NOT sufficient against clickjacking?",
+          "points": 5,
+          "penalty": 0,
+          "order": 5,
+          "answer_required": true,
+          "choices": [
+            {
+              "text": "They slow down the server too much",
+              "correct": false,
+              "order": 0
+            },
+            {
+              "text": "They only work with HTTPS",
+              "correct": false,
+              "order": 1
+            },
+            {
+              "text": "Browsers refuse to run JavaScript inside iframes",
+              "correct": false,
+              "order": 2
+            },
+            {
+              "text": "They run in the victim's browser, in a context the attacker controls, so the attacker can neutralise them",
+              "correct": true,
+              "order": 3
+            }
+          ]
+        },
+        {
+          "question_type": "MCQ",
+          "text": "What does the header 'X-Frame-Options: DENY' tell the browser?",
+          "points": 5,
+          "penalty": 0,
+          "order": 6,
+          "answer_required": true,
+          "choices": [
+            {
+              "text": "Display this page in frames of a list of trusted sites",
+              "correct": false,
+              "order": 0
+            },
+            {
+              "text": "Block all JavaScript of this page",
+              "correct": false,
+              "order": 1
+            },
+            {
+              "text": "Never display this page in a frame, whichever site tries to embed it (even the same origin)",
+              "correct": true,
+              "order": 2
+            },
+            {
+              "text": "Display this page in frames of the same origin only",
+              "correct": false,
+              "order": 3
+            }
+          ]
+        },
+        {
+          "question_type": "FFQ",
+          "text": "Which Content-Security-Policy directive specifies the valid parents that may embed a page in a frame? (answer with the directive name only)",
+          "points": 5,
+          "penalty": 0,
+          "order": 7,
+          "answer_required": true,
+          "choices": [
+            {
+              "text": "frame-ancestors",
+              "correct": true,
+              "order": 0
+            }
+          ]
+        }
+      ],
+      "instructions": "8 questions, 5 points each (= 0.5 / 20 each). Answer from what you did and observed in the lab.",
+      "assessment_type": "TEST"
+    },
+    {
+      "title": "Debriefing and lab report",
+      "level_type": "INFO_LEVEL",
+      "order": 9,
+      "estimated_duration": 0,
+      "minimal_possible_solve_time": null,
+      "content": "# Well done!\n\nYou attacked a website with clickjacking and then defended it in three stages. Remember the lessons:\n\n* **Front-end (JavaScript) defenses are bypassable** - the attacker controls the frame in which your code runs.\n* **Back-end defenses are robust**: send `X-Frame-Options` and/or `Content-Security-Policy: frame-ancestors` so that the *browser* refuses to render your page inside a hostile frame. Prefer `frame-ancestors` (it is more flexible: it can also allow specific trusted parents, e.g. `frame-ancestors 'self' https://partner.example`); keeping both gives coverage for older browsers.\n* Defense in depth: also protect sensitive actions with re-authentication / anti-CSRF tokens and `SameSite` cookies.\n\n## Lab report (to hand in to your teacher)\nDescribe what you did and observed, with **screenshots**, and give an **explanation of the important code snippets** (code without explanation earns no credit). Answer the questions **Q1 to Q12** that were listed in the levels. Further reading: OWASP *Clickjacking* page.\n\nYou can now close your sandbox session; the sandbox will be deleted by your instructor."
+    }
+  ],
+  "estimated_duration": 90,
+  "variant_sandboxes": true
+}

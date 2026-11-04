@@ -1,0 +1,17 @@
+This project combines the following works:
+
+1. SEED Labs - "Clickjacking Lab" (Alice's Cupcakes)
+   Copyright © 2021 by Collin Howland, Faith Letzkus, Julio Trujillo, and Steve Cole at Washington University in St. Louis.
+   Licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0).
+   Source: https://github.com/seed-labs/seed-labs/tree/master/category-web/Web_Clickjacking_Cupcakes
+   Used for: provisioning/roles/seed/files/Labsetup (defender and attacker websites, Docker files) and the lab tasks/questions
+   (Tasks 1-5, questions Q1-Q12) reformulated as game levels. The game design of this repository is therefore distributed under CC BY-NC-SA 4.0.
+
+2. library-junior-hacker (CyberRangeCZ)
+   Code licensed under the MIT License; game design under CC BY 4.0.
+   Copyright (c) 2020 Miriam Gáliková; Copyright (c) 2025 CyberSecurity Hub, z.s.
+   Source: https://github.com/cyberrangecz/library-junior-hacker
+   Used for: the structure of the sandbox definition (topology.yml, provisioning/playbook.yml, requirements.yml) and the training.json format.
+
+Modifications: new topology (SEED VM instead of Kali), new variables.yml (per-student flags), new training definition,
+new verifier tool (cjlab-verify), new provisioning role.

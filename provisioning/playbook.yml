@@ -1,0 +1,38 @@
+---
+# Clickjacking TP (SEED Labs "Alice's Cupcakes") on CyberRangeCZ.
+# The flag_t* variables come from variables.yml (generated per sandbox by the platform).
+
+- name: Configure the student workstation (SEED VM)
+  hosts: seed
+  become: true
+  roles:
+    - role: user-access
+      user_access_username: seed
+      user_access_password: dees
+      user_access_sudo: False
+    - role: seed
+      cj_flags:
+        "0": "{{ flag_t0_setup }}"
+        "1": "{{ flag_t1_iframe }}"
+        "2": "{{ flag_t2_clickjack }}"
+        "3": "{{ flag_t3_framebuster }}"
+        "4": "{{ flag_t4_sandbox }}"
+        "5": "{{ flag_t5_headers }}"
+    - role: chrony
+
+- name: Set up hosts logging roles
+  hosts:
+    - routers
+    - hosts
+  become: yes
+  vars:
+    sandbox_name: clickjacking-cupcakes
+    # Only used when there is no management node ("man"); 127.0.0.1 = do not ship logs anywhere.
+    central_syslog_ip: 127.0.0.1
+  roles:
+    - role: sandbox-logging
+      slf_destination_port: '{% if hostvars["man"] is defined -%} 514 {%- else -%} 515 {%- endif %}'
+      slf_destination: '{% if hostvars["man"] is defined -%} {{ hostvars["man"].ansible_host }} {%- else -%} {{ central_syslog_ip }} {%- endif %}'
+      slf_sandbox_id: "{{ global_sandbox_id | default(student_id) | default(0) }}"
+      slf_sandbox_name: '{{ global_sandbox_name | default(sandbox_name) }}'
+      slf_pool_id: '{{ global_pool_id | default(None) }}'

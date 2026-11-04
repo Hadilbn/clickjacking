@@ -1,0 +1,29 @@
+# APG variables: https://docs.platform.cyberrange.cz/user-guide-advanced/sandboxes/apg-variables/
+# One random value of EACH variable is generated PER SANDBOX (= per student).
+# They are the "variant answers" (flags) of the training levels. The playbook writes them
+# to a root-only file on the student VM; they are released by `sudo cjlab-verify <n>`
+# only once the student's work for the corresponding task is correct.
+
+flag_t0_setup:
+    type: password
+    length: 16
+
+flag_t1_iframe:
+    type: password
+    length: 16
+
+flag_t2_clickjack:
+    type: password
+    length: 16
+
+flag_t3_framebuster:
+    type: password
+    length: 16
+
+flag_t4_sandbox:
+    type: password
+    length: 16
+
+flag_t5_headers:
+    type: password
+    length: 16
